@@ -1,0 +1,99 @@
+-- =====================================================
+-- STAGING LAYER - RAW_AMAZON_DATA
+-- Tabelas para armazenar dados brutos da API Amazon
+-- =====================================================
+
+USE SCHEMA RAW_AMAZON_DATA;
+
+-- =====================================================
+-- TABELA PRINCIPAL DE PRODUTOS BRUTOS
+-- =====================================================
+
+CREATE OR REPLACE TABLE RAW_PRODUCTS (
+    -- Metadados de controle
+    LOAD_ID STRING NOT NULL,
+    LOAD_TIMESTAMP TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    SOURCE_SYSTEM STRING DEFAULT 'AMAZON_API',
+    
+    -- Dados brutos em JSON
+    PRODUCT_JSON VARIANT NOT NULL,
+    
+    -- Campos extraídos para facilitar consultas
+    PRODUCT_ID STRING,
+    SEARCH_CATEGORY STRING,
+    EXTRACTION_DATE DATE DEFAULT CURRENT_DATE(),
+    
+    -- Controle de qualidade
+    IS_VALID BOOLEAN DEFAULT TRUE,
+    VALIDATION_ERRORS STRING,
+    
+    -- Índices para performance
+    PRIMARY KEY (LOAD_ID, PRODUCT_ID)
+);
+
+-- =====================================================
+-- TABELA DE LOG DE EXTRAÇÕES
+-- =====================================================
+
+CREATE OR REPLACE TABLE EXTRACTION_LOG (
+    LOG_ID STRING DEFAULT UUID_STRING(),
+    EXTRACTION_TIMESTAMP TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    SEARCH_QUERY STRING NOT NULL,
+    CATEGORY STRING,
+    TOTAL_PRODUCTS_EXTRACTED NUMBER,
+    SUCCESS_COUNT NUMBER,
+    ERROR_COUNT NUMBER,
+    EXECUTION_TIME_SECONDS NUMBER,
+    STATUS STRING, -- 'SUCCESS', 'PARTIAL', 'FAILED'
+    ERROR_MESSAGE STRING,
+    
+    PRIMARY KEY (LOG_ID)
+);
+
+-- =====================================================
+-- TABELA DE CONTROLE DE QUALIDADE
+-- =====================================================
+
+CREATE OR REPLACE TABLE DATA_QUALITY_CHECKS (
+    CHECK_ID STRING DEFAULT UUID_STRING(),
+    CHECK_TIMESTAMP TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    TABLE_NAME STRING NOT NULL,
+    CHECK_TYPE STRING NOT NULL, -- 'COMPLETENESS', 'VALIDITY', 'CONSISTENCY'
+    CHECK_DESCRIPTION STRING,
+    RECORDS_CHECKED NUMBER,
+    RECORDS_PASSED NUMBER,
+    RECORDS_FAILED NUMBER,
+    PASS_RATE FLOAT,
+    STATUS STRING, -- 'PASS', 'FAIL', 'WARNING'
+    
+    PRIMARY KEY (CHECK_ID)
+);
+
+-- =====================================================
+-- VIEWS PARA FACILITAR ACESSO AOS DADOS BRUTOS
+-- =====================================================
+
+-- View para produtos válidos
+CREATE OR REPLACE VIEW VW_VALID_RAW_PRODUCTS AS
+SELECT 
+    LOAD_ID,
+    LOAD_TIMESTAMP,
+    PRODUCT_JSON,
+    PRODUCT_ID,
+    SEARCH_CATEGORY,
+    EXTRACTION_DATE
+FROM RAW_PRODUCTS 
+WHERE IS_VALID = TRUE;
+
+-- View para análise de qualidade dos dados
+CREATE OR REPLACE VIEW VW_DATA_QUALITY_SUMMARY AS
+SELECT 
+    EXTRACTION_DATE,
+    SEARCH_CATEGORY,
+    COUNT(*) as TOTAL_PRODUCTS,
+    SUM(CASE WHEN IS_VALID THEN 1 ELSE 0 END) as VALID_PRODUCTS,
+    SUM(CASE WHEN IS_VALID THEN 0 ELSE 1 END) as INVALID_PRODUCTS,
+    ROUND(SUM(CASE WHEN IS_VALID THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as QUALITY_PERCENTAGE
+FROM RAW_PRODUCTS
+GROUP BY EXTRACTION_DATE, SEARCH_CATEGORY
+ORDER BY EXTRACTION_DATE DESC, SEARCH_CATEGORY;
